@@ -1,6 +1,30 @@
 {
-  "devDependencies": {
-    "@prettier/plugin-php": "^0.17.6",
-    "prettier": "^2.4.1"
-  }
+	"name": "wp-deploy",
+	"version": "1.0.0",
+	"description": "",
+	"main": "index.js",
+	"scripts": {
+		"build": "wp-scripts build",
+		"check-engines": "wp-scripts check-engines",
+		"check-licenses": "wp-scripts check-licenses",
+		"lint:css": "wp-scripts lint-style",
+		"lint:js": "wp-scripts lint-js",
+		"lint:pkg-json": "wp-scripts lint-pkg-json",
+		"start": "wp-scripts start",
+		"test:e2e": "wp-scripts test-e2e",
+		"test:unit": "wp-scripts test-unit-js",
+		"prettier": "prettier ./wp-deploy.php --write"
+	},
+	"author": "Urij Horuzij",
+	"license": "MIT",
+	"devDependencies": {
+		"@prettier/plugin-php": "^0.19.2",
+		"@wordpress/scripts": "^24.5.0",
+		"prettier": "^2.7.1"
+	},
+	"dependencies": {
+		"@wordpress/api-fetch": "^6.18.0",
+		"@wordpress/components": "^22.0.0",
+		"@wordpress/i18n": "^4.21.0"
+	}
 }

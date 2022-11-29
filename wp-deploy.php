@@ -3,174 +3,144 @@
 Plugin Name: Deploy plugin
 Description: A deploy plugin to rerun github actions
 Author: Urij Horuzij
-Version: 0.2.0
+Author URI: https://github.com/UrijHoruzij
+Version: 1.0.0
+Text Domain: wp-deploy
 */
 
-add_action('admin_menu', 'plugin_setup_menu');
-
-function plugin_setup_menu()
+class WP_deploy
 {
-	add_menu_page(
-		'Сборка сайта',
-		'Сборка сайта',
-		'manage_options',
-		'wp_deploy_plugin',
-		'wp_deploy_page_build',
-		'dashicons-admin-site'
-	);
-	add_submenu_page(
-		'wp_deploy_plugin',
-		'Сборка сайта',
-		'Сборка сайта',
-		'manage_options',
-		'wp_deploy_plugin',
-		'wp_deploy_page_build'
-	);
-	add_submenu_page(
-		'wp_deploy_plugin',
-		'Настройка плагина',
-		'Настройка плагина',
-		'manage_options',
-		'wp_deploy_settings',
-		'wp_deploy_page_settings'
-	);
+	public function __construct()
+	{
+		add_action('admin_menu', [$this, 'add_menu_plugin']);
+		add_action('admin_init', [$this, 'wp_deploy_register_setting']);
+		add_action('rest_api_init', [$this, 'wp_deploy_rest']);
+	}
+	public static function uninit()
+	{
+		remove_action('admin_init', [$this, 'wp_deploy_register_setting']);
+		remove_action('admin_menu', [$this, 'add_menu_plugin']);
+		remove_action('rest_api_init', [$this, 'wp_deploy_rest']);
+		unregister_setting('deploy_settings', 'wp_deploy_plugin_event');
+		unregister_setting('deploy_settings', 'wp_deploy_plugin_user');
+		unregister_setting('deploy_settings', 'wp_deploy_plugin_repos');
+		unregister_setting('deploy_settings', 'wp_deploy_plugin_token');
+		delete_option('wp_deploy_plugin_event');
+		delete_option('wp_deploy_plugin_user');
+		delete_option('wp_deploy_plugin_repos');
+		delete_option('wp_deploy_plugin_token');
+	}
+	public function add_menu_plugin()
+	{
+		$page = add_menu_page(
+			'Сборка сайта',
+			'Сборка сайта',
+			'manage_options',
+			'wp_deploy_plugin',
+			[$this, 'wp_deploy_settings_page'],
+			'dashicons-admin-site'
+		);
+		add_action('load-' . $page, [$this, 'wp_deploy_admin_scripts']);
+	}
+
+	public function wp_deploy_admin_scripts()
+	{
+		$plugin_data = get_plugin_data(__FILE__);
+		$plugin_version = $plugin_data['Version'];
+		wp_enqueue_style(
+			'plugin-wp-deploy-admin-frontend',
+			plugin_dir_url(__FILE__) . 'src/style.css',
+			['wp-components'],
+			$plugin_version
+		);
+		wp_enqueue_script(
+			'plugin-wp-deploy-admin-frontend',
+			plugin_dir_url(__FILE__) . 'build/index.js',
+			['wp-element', 'wp-components', 'wp-api-fetch'],
+			$plugin_version,
+			true
+		);
+	}
+	public function wp_deploy_settings_page()
+	{
+		?>
+        <div id="wp-deploy-app"></div>
+    <?php
+	}
+
+	public function wp_deploy_rest()
+	{
+		register_rest_route('wp/v2', 'wp-deploy/get-settings', [
+			'methods' => 'GET',
+			'callback' => [$this, 'get_settings'],
+		]);
+		register_rest_route('wp/v2', 'wp-deploy/set-settings', [
+			'methods' => 'POST',
+			'callback' => [$this, 'set_settings'],
+		]);
+		register_rest_route('wp/v2', 'wp-deploy/build', [
+			'methods' => 'POST',
+			'callback' => [$this, 'build'],
+		]);
+	}
+
+	public function wp_deploy_register_setting()
+	{
+		register_setting('deploy_settings', 'wp_deploy_plugin_event', 'sanitize_text_field');
+		register_setting('deploy_settings', 'wp_deploy_plugin_user', 'sanitize_text_field');
+		register_setting('deploy_settings', 'wp_deploy_plugin_repos', 'sanitize_text_field');
+		register_setting('deploy_settings', 'wp_deploy_plugin_token', 'sanitize_text_field');
+	}
+	public function get_settings()
+	{
+		$event_type = get_option('wp_deploy_plugin_event');
+		$name_github_user = get_option('wp_deploy_plugin_user');
+		$name_repos = get_option('wp_deploy_plugin_repos');
+		$github_token = get_option('wp_deploy_plugin_token');
+		return [
+			'event' => $event_type ? $event_type : '',
+			'user' => $name_github_user ? $name_github_user : '',
+			'repos' => $name_repos ? $name_repos : '',
+			'token' => $github_token ? $github_token : '',
+		];
+	}
+	public function set_settings($req)
+	{
+		update_option('wp_deploy_plugin_event', $req['event']);
+		update_option('wp_deploy_plugin_user', $req['user']);
+		update_option('wp_deploy_plugin_repos', $req['repos']);
+		update_option('wp_deploy_plugin_token', $req['token']);
+		return ['status' => 'success'];
+	}
+	public function build()
+	{
+		$event_type = get_option('wp_deploy_plugin_event');
+		$name_github_user = get_option('wp_deploy_plugin_user');
+		$name_repos = get_option('wp_deploy_plugin_repos');
+		$github_token = get_option('wp_deploy_plugin_token');
+		if ($event_type && $name_github_user && $name_repos && $github_token) {
+			$endpoint = `https://api.github.com/repos/{$name_github_user}/{$name_repos}/dispatches`;
+			$body = [
+				'event_type' => $event_type,
+			];
+			$body = wp_json_encode($body);
+			$options = [
+				'body' => $body,
+				'headers' => [
+					'Content-Type' => 'application/json',
+					'Accept' => 'application/vnd.github.everest-preview+json',
+					'Authorization' => `Bearer {$github_token}`,
+				],
+				'httpversion' => '1.0',
+				'sslverify' => false,
+				'data_format' => 'body',
+			];
+			wp_remote_post($endpoint, $options);
+			return ['status' => 'success'];
+		}
+		return ['status' => 'error'];
+	}
 }
 
-function wp_deploy_page_settings()
-{
-	?>
-        <div class="wrap">
-	<h2><?php _e('Страница настроек', 'wp_deploy_plugin'); ?></h2>
-	<form method="post" action="options.php">';
-                <?php
-                settings_fields('deploy_settings');
-                do_settings_sections('wp_deploy_settings');
-                submit_button();?>
-	</form>
-</div>;
-<?php
-}
-
-function wp_deploy_page_build()
-{
-	?>
-        <h2><?php _e('Сборка сайта', 'wp_deploy_plugin'); ?></h2>
-        <form method="post">
-            <input type="submit" class="button" name="button-prod" value="Собрать"/>
-        </form>
-<?php
-}
-
-add_action('admin_init', 'wp_deploy_register_setting');
-
-function wp_deploy_register_setting()
-{
-	register_setting('deploy_settings', 'wp_deploy_plugin_event_type', 'sanitize_text_field');
-	add_settings_section('setting_event_type', '', '', 'wp_deploy_settings');
-	add_settings_field(
-		'event_type',
-		__('Название события', 'wp_deploy_plugin'),
-		'deploy_event_type',
-		'wp_deploy_settings',
-		'setting_event_type',
-		[
-			'label_for' => __('Название события', 'wp_deploy_plugin'),
-		]
-	);
-
-	register_setting('deploy_settings', 'wp_deploy_plugin_name_github_user', 'sanitize_text_field');
-	add_settings_section('setting_name_github_user', '', '', 'wp_deploy_settings');
-	add_settings_field(
-		'setting_name_github_user',
-		__('Имя пользователя', 'wp_deploy_plugin'),
-		'deploy_name_github_user',
-		'wp_deploy_settings',
-		'setting_name_github_user',
-		[
-			'label_for' => __('Имя пользователя', 'wp_deploy_plugin'),
-		]
-	);
-
-	register_setting('deploy_settings', 'wp_deploy_plugin_name_repos', 'sanitize_text_field');
-	add_settings_section('setting_name_repos', '', '', 'wp_deploy_settings');
-	add_settings_field(
-		'setting_name_repos',
-		__('Название репозитория', 'wp_deploy_plugin'),
-		'deploy_name_repos',
-		'wp_deploy_settings',
-		'setting_name_repos',
-		[
-			'label_for' => __('Название репозитория', 'wp_deploy_plugin'),
-		]
-	);
-
-	register_setting('deploy_settings', 'wp_deploy_plugin_github_token', 'sanitize_text_field');
-	add_settings_section('setting_github_token', '', '', 'wp_deploy_settings');
-	add_settings_field(
-		'setting_github_token',
-		__('Токен', 'wp_deploy_plugin'),
-		'deploy_github_token',
-		'wp_deploy_settings',
-		'setting_github_token',
-		[
-			'label_for' => __('Токен', 'wp_deploy_plugin'),
-		]
-	);
-}
-
-function deploy_event_type()
-{
-	$text = get_option('wp_deploy_plugin_event_type');
-	printf(
-		'<input type="text" id="wp_deploy_plugin_event_type" name="wp_deploy_plugin_event_type" value="%s" />',
-		esc_attr($text)
-	);
-}
-function deploy_name_github_user()
-{
-	$text = get_option('wp_deploy_plugin_name_github_user');
-	printf(
-		'<input type="text" id="wp_deploy_plugin_name_github_user" name="wp_deploy_plugin_name_github_user" value="%s" />',
-		esc_attr($text)
-	);
-}
-function deploy_name_repos()
-{
-	$text = get_option('wp_deploy_plugin_name_repos');
-	printf(
-		'<input type="text" id="wp_deploy_plugin_name_repos" name="wp_deploy_plugin_name_repos" value="%s" />',
-		esc_attr($text)
-	);
-}
-function deploy_github_token()
-{
-	$text = get_option('wp_deploy_plugin_github_token');
-	printf(
-		'<input type="text" id="wp_deploy_plugin_github_token" name="wp_deploy_plugin_github_token" value="%s" />',
-		esc_attr($text)
-	);
-}
-
-if (isset($_POST['button-prod'])) {
-	$event_type = get_option('wp_deploy_plugin_event_type');
-	$name_github_user = get_option('wp_deploy_plugin_name_github_user');
-	$name_repos = get_option('wp_deploy_plugin_name_repos');
-	$github_token = get_option('wp_deploy_plugin_github_token');
-	$endpoint = 'https://api.github.com/repos/' . $name_github_user . '/' . $name_repos . '/dispatches';
-	$body = [
-		'event_type' => $event_type,
-	];
-	$body = wp_json_encode($body);
-	$options = [
-		'body' => $body,
-		'headers' => [
-			'Content-Type' => 'application/json',
-			'Accept' => 'application/vnd.github.everest-preview+json',
-			'Authorization' => 'Bearer ' . $github_token,
-		],
-		'httpversion' => '1.0',
-		'sslverify' => false,
-		'data_format' => 'body',
-	];
-	wp_remote_post($endpoint, $options);
-}
+$deploy = new WP_deploy();
+register_uninstall_hook(__FILE__, ['WP_deploy', 'uninit']);
